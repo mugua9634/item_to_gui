@@ -1,11 +1,11 @@
 // ==================== 配置与全局变量 ====================
-const STORAGE_KEY = 'item_generator_data_v2';
+const STORAGE_KEY = 'item_generator_data_v3'; // 更新版本号
 const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-const RESTORE_DELAY = isMobile ? 200 : 100;
 
 let items = [];
-let selectedItems = [];
+let selectedItems = []; // 每次都是空的，不记忆
 let currentItem = null;
+let currentFileContent = ''; // 新增：记忆文件内容
 
 // DOM元素缓存
 let uploadScreen, generateScreen, fileInput, dropArea, itemsContainer;
@@ -42,8 +42,9 @@ function initializeApp() {
 // ==================== 本地存储功能 ====================
 function saveToLocalStorage() {
     try {
+        // 只保存文件内容和表单数据，不保存selectedItems
         const saveData = {
-            selectedItems: selectedItems,
+            fileContent: currentFileContent, // 关键：保存文件内容
             secretId: secretIdInput ? secretIdInput.value : '',
             playerId: playerIdInput ? playerIdInput.value : '',
             validTime: validTimeInput ? validTimeInput.value : '60',
@@ -52,7 +53,7 @@ function saveToLocalStorage() {
         };
         
         localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
-        console.log('✅ 记忆保存:', selectedItems.length, '个物品');
+        console.log('✅ 文件内容已记忆，长度:', currentFileContent.length);
         return true;
     } catch (error) {
         console.error('❌ 记忆保存失败:', error);
@@ -73,15 +74,15 @@ function loadFromLocalStorage() {
 
 // ==================== 记忆恢复核心 ====================
 function restorePreviousSession() {
-    console.log('🔄 开始恢复上次会话...');
+    console.log('🔄 尝试恢复上次的文件...');
     
     const savedData = loadFromLocalStorage();
     if (!savedData) {
-        console.log('没有找到历史记忆');
+        console.log('没有找到历史文件');
         return;
     }
     
-    console.log('找到历史记忆:', savedData);
+    console.log('找到历史文件，长度:', savedData.fileContent?.length || 0);
     
     // 恢复表单数据
     if (savedData.secretId && secretIdInput) {
@@ -101,46 +102,13 @@ function restorePreviousSession() {
         }
     }
     
-    // 恢复选中的物品（但不立即标记按钮，等物品显示后处理）
-    if (savedData.selectedItems && savedData.selectedItems.length > 0) {
-        selectedItems = JSON.parse(JSON.stringify(savedData.selectedItems));
-        updateSelectedItems();
-        console.log(`已恢复 ${selectedItems.length} 个物品到内存`);
-    }
-}
-
-function restoreSelectionState() {
-    console.log('🎯 恢复物品选中状态...');
-    
-    if (!itemsGrid || itemsGrid.children.length === 0) {
-        console.log('物品按钮尚未渲染，稍后重试...');
-        setTimeout(restoreSelectionState, RESTORE_DELAY);
-        return;
-    }
-    
-    if (selectedItems.length === 0) {
-        console.log('没有需要恢复的选中物品');
-        return;
-    }
-    
-    const buttons = itemsGrid.querySelectorAll('.item-btn');
-    let restoredCount = 0;
-    
-    buttons.forEach(btn => {
-        const btnId = btn.getAttribute('data-id');
-        const isSelected = selectedItems.find(item => item.id === btnId);
-        
-        if (isSelected) {
-            btn.classList.add('selected');
-            restoredCount++;
-        }
-    });
-    
-    if (restoredCount > 0) {
-        console.log(`✅ 成功标记 ${restoredCount} 个按钮为选中状态`);
-        showToast(`已恢复 ${restoredCount} 个物品的选择`);
-    } else {
-        console.log('⚠️ 未找到匹配的按钮，可能是文件不同');
+    // 关键：如果有保存的文件内容，自动解析并显示
+    if (savedData.fileContent && savedData.fileContent.length > 100) {
+        console.log('📂 自动恢复上次的文件内容...');
+        setTimeout(() => {
+            parseFileContent(savedData.fileContent);
+            showToast('已恢复上次的物品列表');
+        }, 300);
     }
 }
 
@@ -187,21 +155,16 @@ function setupEventListeners() {
     
     // 自动保存机制
     window.addEventListener('beforeunload', () => {
-        console.log('⏳ 页面关闭，保存记忆...');
+        console.log('⏳ 页面关闭，记忆文件内容...');
         saveToLocalStorage();
     });
     
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-            console.log('📱 页面隐藏，保存记忆...');
+            console.log('📱 页面隐藏，记忆文件内容...');
             saveToLocalStorage();
         }
     });
-    
-    // 每30秒保存一次
-    setInterval(() => {
-        if (selectedItems.length > 0) saveToLocalStorage();
-    }, 30000);
     
     // 移除按钮事件委托
     document.addEventListener('click', (e) => {
@@ -229,8 +192,12 @@ function handleFile(file) {
     
     const reader = new FileReader();
     reader.onload = (e) => {
-        parseFileContent(e.target.result);
+        currentFileContent = e.target.result; // 保存文件内容
+        parseFileContent(currentFileContent);
         showToast(`已解析 ${items.length} 个物品`);
+        
+        // 文件读取后自动保存
+        setTimeout(saveToLocalStorage, 500);
     };
     reader.onerror = () => showToast('文件读取失败');
     reader.readAsText(file, 'UTF-8');
@@ -287,10 +254,11 @@ function parseFileContent(content) {
     items = uniqueItems.sort((a, b) => parseInt(a.id) - parseInt(b.id));
     console.log(`📄 解析完成: ${items.length}个物品`);
     
-    displayItems();
+    // 清空之前的选择（确保每次都是新开始）
+    selectedItems = [];
+    updateSelectedItems();
     
-    // ✅ 关键：在物品显示后恢复选中状态
-    setTimeout(restoreSelectionState, RESTORE_DELAY);
+    displayItems();
 }
 
 // ==================== 物品显示与选择 ====================
@@ -304,7 +272,7 @@ function displayItems() {
     if (itemsGrid) itemsGrid.innerHTML = '';
     if (itemCount) itemCount.textContent = `${items.length} 个物品`;
     
-    console.log(`🖼️ 开始显示 ${items.length} 个物品按钮`);
+    console.log(`🖼️ 显示 ${items.length} 个物品按钮`);
     
     items.forEach(item => {
         const btn = document.createElement('button');
@@ -317,12 +285,6 @@ function displayItems() {
         `;
         
         btn.addEventListener('click', () => selectItem(item));
-        
-        // 如果这个物品在记忆中被选中，标记为选中状态
-        const isSelected = selectedItems.find(si => si.id === item.id);
-        if (isSelected) {
-            btn.classList.add('selected');
-        }
         
         if (itemsGrid) itemsGrid.appendChild(btn);
     });
@@ -377,8 +339,6 @@ function confirmQuantity() {
             }
         });
     }
-    
-    saveToLocalStorage();
 }
 
 function updateSelectedItems() {
@@ -405,7 +365,7 @@ function updateSelectedItems() {
     }
     
     if (nextBtn) nextBtn.disabled = false;
-    console.log(`📋 已选物品更新: ${selectedItems.length}个`);
+    console.log(`📋 已选物品: ${selectedItems.length}个`);
 }
 
 function removeSelectedItem(index) {
@@ -425,7 +385,6 @@ function removeSelectedItem(index) {
         }
         
         showToast(`已移除 ${removedItem.name}`);
-        saveToLocalStorage();
     }
 }
 
@@ -440,7 +399,6 @@ function clearAll() {
         buttons.forEach(btn => btn.classList.remove('selected'));
     }
     
-    saveToLocalStorage();
     showToast('已清空所有选择');
 }
 
@@ -555,7 +513,24 @@ function resetGenerateScreen() {
     
     toggleTimeInput();
     generateCommand();
-    saveToLocalStorage();
+}
+
+// ==================== 新增：清除文件记忆 ====================
+function clearFileMemory() {
+    currentFileContent = '';
+    items = [];
+    selectedItems = [];
+    
+    // 清空显示
+    if (itemsContainer) itemsContainer.style.display = 'none';
+    if (itemsGrid) itemsGrid.innerHTML = '';
+    updateSelectedItems();
+    
+    // 清除存储
+    localStorage.removeItem(STORAGE_KEY);
+    
+    showToast('已清除文件记忆');
+    console.log('🗑️ 文件记忆已清除');
 }
 
 // ==================== 工具函数 ====================
@@ -578,12 +553,11 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
     setupEventListeners();
     
-    // 恢复表单数据
+    // 自动恢复上次的文件
     restorePreviousSession();
     
-    // 稍后显示欢迎消息
     setTimeout(() => {
-        showToast('应用已准备就绪');
+        showToast('应用已就绪' + (currentFileContent ? ' (已恢复文件)' : ''));
         console.log('✅ 应用初始化完成');
     }, 500);
 });
@@ -595,4 +569,4 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-console.log('🧠 记忆功能已加载 - 自动保存/恢复');
+console.log('📂 文件记忆功能已加载 - 只记忆文件，不记忆选择');
