@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>物品代码生成器</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 上传界面 -->
+        <div id="upload-screen" class="screen active">
+            <header class="screen-header">
+                <h1><i class="fas fa-file-upload"></i> 上传物品文件</h1>
+            </header>
+            
+            <main class="screen-content">
+                <!-- 文件上传区域 -->
+                <div class="upload-area" id="drop-area">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>点击或拖拽文件到此区域</p>
+                    <p class="upload-hint">支持格式：数字 + 空格 + 物品名称</p>
+                    <input type="file" id="file-input" accept=".txt" hidden>
+                    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+                        <i class="fas fa-folder-open"></i> 选择文件
+                    </button>
+                </div>
+                
+                <!-- 物品按钮容器 -->
+                <div class="items-container" id="items-container" style="display: none;">
+                    <div class="items-header">
+                        <h3><i class="fas fa-cube"></i> 物品列表</h3>
+                        <span id="item-count">0 个物品</span>
+                    </div>
+                    <div class="items-grid" id="items-grid">
+                        <!-- 物品按钮将通过JS动态生成 -->
+                    </div>
+                </div>
+                
+                <!-- 已选物品显示 -->
+                <div class="selected-items" id="selected-items" style="display: none;">
+                    <h4><i class="fas fa-check-circle"></i> 已选择物品</h4>
+                    <div id="selected-list"></div>
+                </div>
+                
+                <!-- 数量输入模态框 -->
+                <div class="modal" id="quantity-modal">
+                    <div class="modal-content">
+                        <h3>输入数量</h3>
+                        <p>物品：<span id="current-item-name"></span></p>
+                        <input type="number" id="quantity-input" placeholder="请输入数量" min="1" value="1">
+                        <div class="modal-buttons">
+                            <button class="btn btn-secondary" onclick="closeQuantityModal()">取消</button>
+                            <button class="btn btn-primary" onclick="confirmQuantity()">确定</button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+            
+            <footer class="screen-footer">
+                <button class="btn btn-secondary" onclick="clearAll()">
+                    <i class="fas fa-trash"></i> 清空
+                </button>
+                <button class="btn btn-primary" id="next-btn" onclick="goToGenerateScreen()" disabled>
+                    <i class="fas fa-arrow-right"></i> 下一步
+                </button>
+            </footer>
+        </div>
+        
+        <!-- 生成界面 -->
+        <div id="generate-screen" class="screen">
+            <header class="screen-header">
+                <button class="btn btn-back" onclick="goBackToUpload()">
+                    <i class="fas fa-arrow-left"></i> 返回
+                </button>
+                <h1><i class="fas fa-code"></i> 生成命令</h1>
+            </header>
+            
+            <main class="screen-content">
+                <!-- 命令类型选择 -->
+                <div class="form-group">
+                    <label><i class="fas fa-cog"></i> 命令类型</label>
+                    <div class="radio-group">
+                        <label class="radio-item">
+                            <input type="radio" name="cmd-type" value="single" checked onclick="toggleTimeInput()">
+                            <span>/新建兑换码</span>
+                        </label>
+                        <label class="radio-item">
+                            <input type="radio" name="cmd-type" value="all" onclick="toggleTimeInput()">
+                            <span>/新建全服兑换码</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- 密钥ID输入 -->
+                <div class="form-group">
+                    <label><i class="fas fa-key"></i> 密钥ID</label>
+                    <input type="text" id="secret-id" placeholder="请输入密钥ID">
+                </div>
+                
+                <!-- 玩家ID输入（单服兑换码显示） -->
+                <div class="form-group" id="player-id-group">
+                    <label><i class="fas fa-user"></i> 玩家ID</label>
+                    <input type="text" id="player-id" placeholder="请输入玩家ID">
+                </div>
+                
+                <!-- 有效时间输入（全服兑换码显示） -->
+                <div class="form-group" id="time-group" style="display: none;">
+                    <label><i class="fas fa-clock"></i> 有效时间(分钟)</label>
+                    <input type="number" id="valid-time" placeholder="请输入有效时间" min="1" value="60">
+                </div>
+                
+                <!-- 已选物品显示区域 -->
+                <div class="form-group">
+                    <label><i class="fas fa-boxes"></i> 物品列表</label>
+                    <div class="items-preview" id="items-preview">
+                        <!-- 物品列表将通过JS动态生成 -->
+                    </div>
+                </div>
+                
+                <!-- 生成结果 -->
+                <div class="form-group">
+                    <label><i class="fas fa-terminal"></i> 生成的命令</label>
+                    <div class="output-container">
+                        <textarea id="output-command" readonly placeholder="生成的命令将显示在这里"></textarea>
+                        <div class="output-buttons">
+                            <button class="btn btn-secondary" onclick="generateCommand()">
+                                <i class="fas fa-sync-alt"></i> 重新生成
+                            </button>
+                            <button class="btn btn-primary" onclick="copyCommand()">
+                                <i class="fas fa-copy"></i> 复制命令
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+            
+            <footer class="screen-footer">
+                <button class="btn btn-secondary" onclick="resetGenerateScreen()">
+                    <i class="fas fa-redo"></i> 重置
+                </button>
+                <button class="btn btn-success" onclick="generateAndCopy()">
+                    <i class="fas fa-check"></i> 生成并复制
+                </button>
+            </footer>
+        </div>
+    </div>
+    
+    <!-- 消息提示 -->
+    <div id="toast"></div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
