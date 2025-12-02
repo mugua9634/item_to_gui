@@ -133,51 +133,156 @@ function handleFile(file) {
     reader.readAsText(file, 'UTF-8');
 }
 
-// 解析文件内容（纯前端处理）
+// 解析文件内容（增强版，确保跨设备一致性）
 function parseFileContent(content) {
-    console.log('开始解析文件内容');
+    console.log('开始解析文件内容，长度:', content.length);
     items = [];
-    const lines = content.split('\n');
-    console.log('文件总行数:', lines.length);
     
-    let parsedCount = 0;
+    // 1. 统一换行符：将各种换行符统一为 \n
+    content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    
+    // 2. 按行分割
+    const lines = content.split('\n');
+    console.log('标准化后总行数:', lines.length);
+    
+    // 3. 统计信息
+    let validLines = 0;
+    let ignoredLines = 0;
+    let lastParsedLine = '';
+    
     lines.forEach((line, index) => {
-        line = line.trim();
-        if (!line) {
-            console.log(`第${index+1}行为空，跳过`);
+        const lineNum = index + 1;
+        const trimmedLine = line.trim();
+        
+        // 跳过空行
+        if (!trimmedLine) {
+            console.log(`行${lineNum}: 空行，跳过`);
+            ignoredLines++;
             return;
         }
         
-        // 更灵活的正则匹配，适应多种格式
-        // 匹配：数字 + 分隔符（空格、tab、点、中文标点等）+ 名称
-        const match = line.match(/^(\d+)[\s\t　、，。.\-]*([^#\n\r]+)/);
-        if (match) {
-            const id = match[1].trim();
-            let name = match[2].trim();
-            
-            // 清理名称中的#颜色标记和其他特殊字符
+        // 调试：记录前几行内容
+        if (lineNum <= 5) {
+            console.log(`行${lineNum}原始内容: "${line}"`);
+            console.log(`行${lineNum}处理后: "${trimmedLine}"`);
+        }
+        
+        // 多种匹配模式，确保兼容性
+        let id, name;
+        
+        // 模式1: 数字 + 空格/制表符 + 名称 (最常用)
+        const pattern1 = trimmedLine.match(/^(\d+)[\s\t　]+(.+)$/);
+        
+        // 模式2: 数字 + 任何分隔符 + 名称
+        const pattern2 = trimmedLine.match(/^(\d+)[^\d\w]*(.+)$/);
+        
+        // 模式3: 处理包含#颜色标记的情况
+        const pattern3 = trimmedLine.match(/^(\d+).*?(.+?)(?:#|$)/);
+        
+        if (pattern1) {
+            id = pattern1[1];
+            name = pattern1[2];
+        } else if (pattern2) {
+            id = pattern2[1];
+            name = pattern2[2];
+        } else if (pattern3) {
+            id = pattern3[1];
+            name = pattern3[2];
+        }
+        
+        // 清理名称
+        if (name) {
+            // 移除颜色标记 #G #R #Y #B #c32CD99 等
             name = name.replace(/#[A-Za-z0-9]+/g, '')
-                      .replace(/\s+/g, ' ')
-                      .trim();
+                       // 移除前后空白和特殊空格
+                       .replace(/^[\s\t　]+|[\s\t　]+$/g, '')
+                       // 合并多个空格
+                       .replace(/\s+/g, ' ')
+                       .trim();
             
-            if (name && id) {
-                items.push({
-                    id: id,
-                    name: name,
-                    fullName: match[2].trim(),
-                    lineNumber: index + 1
-                });
-                parsedCount++;
-                console.log(`解析成功 行${index+1}: ID=${id}, 名称=${name}`);
-            } else {
-                console.warn(`行${index+1}解析后名称为空: "${line}"`);
+            // 移除末尾的分号、冒号等标点
+            name = name.replace(/[;；:：,，、。.]$/g, '');
+        }
+        
+        if (id && name && name.length > 0) {
+            items.push({
+                id: id.trim(),
+                name: name,
+                fullName: trimmedLine,
+                lineNumber: lineNum
+            });
+            validLines++;
+            lastParsedLine = `行${lineNum}: ID=${id}, 名称=${name}`;
+            
+            if (lineNum <= 10) {
+                console.log(`✓ 行${lineNum}: ID=${id}, 名称=${name}`);
             }
         } else {
-            console.warn(`行${index+1}无法解析，跳过: "${line}"`);
+            console.warn(`✗ 行${lineNum} 解析失败: "${trimmedLine}"`);
+            ignoredLines++;
+            
+            // 特殊处理：如果这行看起来像数据但解析失败，尝试更宽松的解析
+            if (trimmedLine.match(/^\d/)) {
+                console.warn(`  尝试紧急解析: "${trimmedLine}"`);
+                const emergencyMatch = trimmedLine.match(/(\d+).*?([\u4e00-\u9fa5a-zA-Z0-9].*)/);
+                if (emergencyMatch) {
+                    const emergencyId = emergencyMatch[1];
+                    const emergencyName = emergencyMatch[2].replace(/#[A-Za-z0-9]+/g, '').trim();
+                    if (emergencyName) {
+                        items.push({
+                            id: emergencyId,
+                            name: emergencyName,
+                            fullName: trimmedLine,
+                            lineNumber: lineNum,
+                            emergency: true
+                        });
+                        validLines++;
+                        console.log(`  ✓ 紧急解析成功: ID=${emergencyId}, 名称=${emergencyName}`);
+                    }
+                }
+            }
         }
     });
     
-    console.log('解析完成，成功解析', parsedCount, '个物品');
+    // 4. 结果验证和去重
+    const uniqueItems = [];
+    const idMap = new Map();
+    
+    items.forEach(item => {
+        if (!idMap.has(item.id)) {
+            idMap.set(item.id, true);
+            uniqueItems.push(item);
+        } else {
+            console.warn(`重复ID ${item.id}，跳过: ${item.name}`);
+        }
+    });
+    
+    items = uniqueItems;
+    
+    // 5. 按ID排序
+    items.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    
+    console.log('========== 解析完成 ==========');
+    console.log(`总行数: ${lines.length}`);
+    console.log(`有效物品: ${validLines}`);
+    console.log(`去重后: ${items.length}`);
+    console.log(`忽略行数: ${ignoredLines}`);
+    console.log(`最后解析的行: ${lastParsedLine}`);
+    console.log('前5个物品:');
+    items.slice(0, 5).forEach(item => {
+        console.log(`  ${item.id}: ${item.name}`);
+    });
+    
+    // 6. 显示统计信息
+    const statInfo = `解析完成: ${lines.length}行 → ${items.length}个物品`;
+    console.log(statInfo);
+    showToast(statInfo);
+    
+    // 7. 如果有解析失败的潜在问题，给出警告
+    if (items.length < validLines) {
+        console.warn(`注意: 有${validLines - items.length}个重复ID被移除`);
+    }
+    
     displayItems();
 }
 
