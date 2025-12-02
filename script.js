@@ -1,5 +1,8 @@
 // ==================== 配置与全局变量 ====================
 const STORAGE_KEY = 'item_generator_data_v2';
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+const RESTORE_DELAY = isMobile ? 200 : 100;
+
 let items = [];
 let selectedItems = [];
 let currentItem = null;
@@ -12,7 +15,8 @@ let outputCommand, secretIdInput, playerIdInput, validTimeInput;
 
 // ==================== 初始化函数 ====================
 function initializeApp() {
-    // 缓存DOM元素
+    console.log('应用初始化 - 设备:', isMobile ? '移动端' : '桌面端');
+    
     uploadScreen = document.getElementById('upload-screen');
     generateScreen = document.getElementById('generate-screen');
     fileInput = document.getElementById('file-input');
@@ -32,7 +36,7 @@ function initializeApp() {
     playerIdInput = document.getElementById('player-id');
     validTimeInput = document.getElementById('valid-time');
     
-    console.log('应用初始化完成');
+    console.log('DOM元素初始化完成');
 }
 
 // ==================== 本地存储功能 ====================
@@ -48,10 +52,10 @@ function saveToLocalStorage() {
         };
         
         localStorage.setItem(STORAGE_KEY, JSON.stringify(saveData));
-        console.log('自动保存完成，物品数:', selectedItems.length);
+        console.log('✅ 记忆保存:', selectedItems.length, '个物品');
         return true;
     } catch (error) {
-        console.error('自动保存失败:', error);
+        console.error('❌ 记忆保存失败:', error);
         return false;
     }
 }
@@ -59,46 +63,25 @@ function saveToLocalStorage() {
 function loadFromLocalStorage() {
     try {
         const dataStr = localStorage.getItem(STORAGE_KEY);
-        if (!dataStr) {
-            console.log('本地存储中没有数据');
-            return null;
-        }
-        
+        if (!dataStr) return null;
         return JSON.parse(dataStr);
     } catch (error) {
-        console.error('读取本地存储失败:', error);
-        localStorage.removeItem(STORAGE_KEY);
+        console.error('❌ 记忆读取失败:', error);
         return null;
     }
 }
 
+// ==================== 记忆恢复核心 ====================
 function restorePreviousSession() {
+    console.log('🔄 开始恢复上次会话...');
+    
     const savedData = loadFromLocalStorage();
-    if (!savedData) return;
-    
-    console.log('恢复上次会话数据...');
-    
-    // 恢复选中的物品
-    if (savedData.selectedItems && savedData.selectedItems.length > 0) {
-        selectedItems = savedData.selectedItems;
-        console.log(`恢复了 ${selectedItems.length} 个物品`);
-        
-        // 立即更新UI
-        updateSelectedItems();
-        
-        // 如果物品列表已显示，更新按钮状态
-        setTimeout(() => {
-            if (itemsGrid) {
-                const buttons = itemsGrid.querySelectorAll('.item-btn');
-                buttons.forEach(btn => {
-                    const btnId = btn.getAttribute('data-id');
-                    if (selectedItems.find(item => item.id === btnId)) {
-                        btn.classList.add('selected');
-                    }
-                });
-            }
-        }, 100);
+    if (!savedData) {
+        console.log('没有找到历史记忆');
+        return;
     }
+    
+    console.log('找到历史记忆:', savedData);
     
     // 恢复表单数据
     if (savedData.secretId && secretIdInput) {
@@ -114,29 +97,67 @@ function restorePreviousSession() {
         const radioBtn = document.querySelector(`input[name="cmd-type"][value="${savedData.cmdType}"]`);
         if (radioBtn) {
             radioBtn.checked = true;
-            if (typeof toggleTimeInput === 'function') {
-                toggleTimeInput();
-            }
+            if (typeof toggleTimeInput === 'function') toggleTimeInput();
         }
     }
     
-    showToast(`已恢复 ${selectedItems.length} 个物品`);
+    // 恢复选中的物品（但不立即标记按钮，等物品显示后处理）
+    if (savedData.selectedItems && savedData.selectedItems.length > 0) {
+        selectedItems = JSON.parse(JSON.stringify(savedData.selectedItems));
+        updateSelectedItems();
+        console.log(`已恢复 ${selectedItems.length} 个物品到内存`);
+    }
+}
+
+function restoreSelectionState() {
+    console.log('🎯 恢复物品选中状态...');
+    
+    if (!itemsGrid || itemsGrid.children.length === 0) {
+        console.log('物品按钮尚未渲染，稍后重试...');
+        setTimeout(restoreSelectionState, RESTORE_DELAY);
+        return;
+    }
+    
+    if (selectedItems.length === 0) {
+        console.log('没有需要恢复的选中物品');
+        return;
+    }
+    
+    const buttons = itemsGrid.querySelectorAll('.item-btn');
+    let restoredCount = 0;
+    
+    buttons.forEach(btn => {
+        const btnId = btn.getAttribute('data-id');
+        const isSelected = selectedItems.find(item => item.id === btnId);
+        
+        if (isSelected) {
+            btn.classList.add('selected');
+            restoredCount++;
+        }
+    });
+    
+    if (restoredCount > 0) {
+        console.log(`✅ 成功标记 ${restoredCount} 个按钮为选中状态`);
+        showToast(`已恢复 ${restoredCount} 个物品的选择`);
+    } else {
+        console.log('⚠️ 未找到匹配的按钮，可能是文件不同');
+    }
 }
 
 // ==================== 事件监听器 ====================
 function setupEventListeners() {
-    // 文件拖拽功能
+    // 文件拖拽
     if (dropArea) {
-        dropArea.addEventListener('dragover', function(e) {
+        dropArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropArea.classList.add('dragover');
         });
 
-        dropArea.addEventListener('dragleave', function() {
+        dropArea.addEventListener('dragleave', () => {
             dropArea.classList.remove('dragover');
         });
 
-        dropArea.addEventListener('drop', function(e) {
+        dropArea.addEventListener('drop', (e) => {
             e.preventDefault();
             dropArea.classList.remove('dragover');
             if (e.dataTransfer.files.length > 0) {
@@ -145,37 +166,51 @@ function setupEventListeners() {
         });
     }
 
-    // 文件选择事件
+    // 文件选择
     if (fileInput) {
-        fileInput.addEventListener('change', function(e) {
-            if (e.target.files.length > 0) {
-                handleFile(e.target.files[0]);
-            }
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleFile(e.target.files[0]);
         });
     }
 
-    // 数量输入框事件
+    // 数量输入
     if (quantityInput) {
-        quantityInput.addEventListener('keypress', function(e) {
+        quantityInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') confirmQuantity();
         });
     }
 
-    // 自动生成命令的输入事件
+    // 自动生成命令
     if (secretIdInput) secretIdInput.addEventListener('input', generateCommand);
     if (playerIdInput) playerIdInput.addEventListener('input', generateCommand);
     if (validTimeInput) validTimeInput.addEventListener('input', generateCommand);
     
-    // 页面关闭前自动保存
-    window.addEventListener('beforeunload', function() {
+    // 自动保存机制
+    window.addEventListener('beforeunload', () => {
+        console.log('⏳ 页面关闭，保存记忆...');
         saveToLocalStorage();
     });
     
-    // 每隔30秒自动保存
-    setInterval(saveToLocalStorage, 30000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            console.log('📱 页面隐藏，保存记忆...');
+            saveToLocalStorage();
+        }
+    });
     
-    // 移动端触摸优化
-    document.addEventListener('touchstart', function() {}, {passive: true});
+    // 每30秒保存一次
+    setInterval(() => {
+        if (selectedItems.length > 0) saveToLocalStorage();
+    }, 30000);
+    
+    // 移除按钮事件委托
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.remove-tag')) {
+            const removeBtn = e.target.closest('.remove-tag');
+            const index = parseInt(removeBtn.getAttribute('data-index'));
+            removeSelectedItem(index);
+        }
+    });
 }
 
 // ==================== 文件处理函数 ====================
@@ -190,24 +225,14 @@ function handleFile(file) {
         return;
     }
     
-    if (file.size > 1024 * 1024) {
-        showToast('文件过大，请选择小于1MB的文件');
-        return;
-    }
-    
     showToast('正在读取文件...');
     
     const reader = new FileReader();
-    reader.onload = function(e) {
-        const content = e.target.result;
-        parseFileContent(content);
+    reader.onload = (e) => {
+        parseFileContent(e.target.result);
         showToast(`已解析 ${items.length} 个物品`);
     };
-    
-    reader.onerror = function() {
-        showToast('文件读取失败');
-    };
-    
+    reader.onerror = () => showToast('文件读取失败');
     reader.readAsText(file, 'UTF-8');
 }
 
@@ -220,7 +245,6 @@ function parseFileContent(content) {
         const trimmedLine = line.trim();
         if (!trimmedLine) return;
         
-        // 多种匹配模式
         const pattern1 = trimmedLine.match(/^(\d+)[\s\t　]+(.+)$/);
         const pattern2 = trimmedLine.match(/^(\d+)[^\d\w]*(.+)$/);
         
@@ -236,8 +260,8 @@ function parseFileContent(content) {
         if (name) {
             name = name.replace(/#[A-Za-z0-9]+/g, '')
                        .replace(/\s+/g, ' ')
-                       .trim();
-            name = name.replace(/[;；:：,，、。.]$/g, '');
+                       .trim()
+                       .replace(/[;；:：,，、。.]$/g, '');
         }
         
         if (id && name && name.length > 0) {
@@ -250,7 +274,7 @@ function parseFileContent(content) {
         }
     });
     
-    // 去重并按ID排序
+    // 去重排序
     const uniqueItems = [];
     const idMap = new Map();
     items.forEach(item => {
@@ -261,9 +285,12 @@ function parseFileContent(content) {
     });
     
     items = uniqueItems.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    console.log(`📄 解析完成: ${items.length}个物品`);
     
-    console.log(`解析完成: ${items.length}个物品`);
     displayItems();
+    
+    // ✅ 关键：在物品显示后恢复选中状态
+    setTimeout(restoreSelectionState, RESTORE_DELAY);
 }
 
 // ==================== 物品显示与选择 ====================
@@ -277,6 +304,8 @@ function displayItems() {
     if (itemsGrid) itemsGrid.innerHTML = '';
     if (itemCount) itemCount.textContent = `${items.length} 个物品`;
     
+    console.log(`🖼️ 开始显示 ${items.length} 个物品按钮`);
+    
     items.forEach(item => {
         const btn = document.createElement('button');
         btn.className = 'item-btn';
@@ -289,13 +318,16 @@ function displayItems() {
         
         btn.addEventListener('click', () => selectItem(item));
         
-        // 检查是否已选中
-        if (selectedItems.find(si => si.id === item.id)) {
+        // 如果这个物品在记忆中被选中，标记为选中状态
+        const isSelected = selectedItems.find(si => si.id === item.id);
+        if (isSelected) {
             btn.classList.add('selected');
         }
         
         if (itemsGrid) itemsGrid.appendChild(btn);
     });
+    
+    console.log('✅ 物品按钮显示完成');
 }
 
 function selectItem(item) {
@@ -373,45 +405,43 @@ function updateSelectedItems() {
     }
     
     if (nextBtn) nextBtn.disabled = false;
+    console.log(`📋 已选物品更新: ${selectedItems.length}个`);
 }
 
-// 事件委托处理移除按钮点击
-document.addEventListener('click', function(e) {
-    if (e.target.closest('.remove-tag')) {
-        const removeBtn = e.target.closest('.remove-tag');
-        const index = parseInt(removeBtn.getAttribute('data-index'));
-        if (index >= 0 && index < selectedItems.length) {
-            const removedItem = selectedItems[index];
-            selectedItems.splice(index, 1);
-            updateSelectedItems();
-            
-            // 更新按钮选中状态
-            if (itemsGrid) {
-                const buttons = itemsGrid.querySelectorAll('.item-btn');
-                buttons.forEach(btn => {
-                    if (btn.getAttribute('data-id') === removedItem.id) {
-                        btn.classList.remove('selected');
-                    }
-                });
-            }
-            
-            showToast(`已移除 ${removedItem.name}`);
-            saveToLocalStorage();
+function removeSelectedItem(index) {
+    if (index >= 0 && index < selectedItems.length) {
+        const removedItem = selectedItems[index];
+        selectedItems.splice(index, 1);
+        updateSelectedItems();
+        
+        // 更新按钮选中状态
+        if (itemsGrid) {
+            const buttons = itemsGrid.querySelectorAll('.item-btn');
+            buttons.forEach(btn => {
+                if (btn.getAttribute('data-id') === removedItem.id) {
+                    btn.classList.remove('selected');
+                }
+            });
         }
+        
+        showToast(`已移除 ${removedItem.name}`);
+        saveToLocalStorage();
     }
-});
+}
 
 function clearAll() {
+    console.log('🧹 清空所有选择');
     selectedItems = [];
     updateSelectedItems();
     
+    // 清除按钮选中状态
     if (itemsGrid) {
         const buttons = itemsGrid.querySelectorAll('.item-btn');
         buttons.forEach(btn => btn.classList.remove('selected'));
     }
     
-    showToast('已清空所有选择');
     saveToLocalStorage();
+    showToast('已清空所有选择');
 }
 
 // ==================== 页面导航 ====================
@@ -543,16 +573,19 @@ function showToast(message) {
 
 // ==================== 主初始化 ====================
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 应用启动中...');
+    
     initializeApp();
     setupEventListeners();
     
-    // 页面加载完成后恢复数据
-    setTimeout(() => {
-        restorePreviousSession();
-        showToast('应用已准备就绪');
-    }, 300);
+    // 恢复表单数据
+    restorePreviousSession();
     
-    console.log('记忆功能已启用 - 退出时自动保存，进入时自动恢复');
+    // 稍后显示欢迎消息
+    setTimeout(() => {
+        showToast('应用已准备就绪');
+        console.log('✅ 应用初始化完成');
+    }, 500);
 });
 
 // 键盘快捷键
@@ -561,3 +594,5 @@ document.addEventListener('keydown', function(e) {
         closeQuantityModal();
     }
 });
+
+console.log('🧠 记忆功能已加载 - 自动保存/恢复');
